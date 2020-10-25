@@ -6,56 +6,54 @@
 ##
 ## Usage: ImportArgos <ARGOS folder> <Output feature class> 
 ##
-## Created: Fall 2020
-## Author: Masha.edmondson@duke.edu (for ENV859)
+## Created: Fall 2018
+## Author: Masha.Edmondson@duke.edu (for ENV859)
 ##---------------------------------------------------------------------
 
 # Import modules
 import sys, os, arcpy
+arcpy.env.overwriteOutput = True
 
-#Allow arcpy to overwrite outputs
-arcpy.env.overwriteOutput =True
+# Set input variables (user input)
+inputFolder = arcpy.GetParameterAsText(0)
+inputFiles = os.listdir(inputFolder)
+lcFilter = arcpy.GetParameterAsText(1).split(";")
+outputFC = arcpy.GetParameterAsText(2)
+outputSR = arcpy.GetParameterAsText(3)
 
-# Set input variables (Hard-wired)
-#inputFile = 'V:/ARGOSTracking/Data/ARGOSData/1997dg.txt'
-inputFolder = "V:\\ARGOSTRACKING\\Data\\ARGOSdata"
-
-outputFC = "V:/ARGOSTracking/Scratch/ARGOStrack.shp"
-outputSR = arcpy.SpatialReference(54002)
-
-#Task1
 ## Prepare a new feature class to which we'll add tracking points
 # Create an empty feature class; requires the path and name as separate parameters
-outPath, outName = os.path.split(outputFC)
-arcpy.CreateFeatureclass_management(outPath,outName,"POINT","","","", outputSR)
+outPath,outName = os.path.split(outputFC)
+arcpy.CreateFeatureclass_management(outPath,outName,"POINT","","","",outputSR)
 
 # Add TagID, LC, IQ, and Date fields to the output feature class
 arcpy.AddField_management(outputFC,"TagID","LONG")
 arcpy.AddField_management(outputFC,"LC","TEXT")
 arcpy.AddField_management(outputFC,"Date","DATE")
 
-#create an Insert cursor
+# Create the insert cursor
 cur = arcpy.da.InsertCursor(outputFC,['Shape@','TagID','LC','Date'])
 
-#iterate through each ARGOS file in the user supplied folder
-inputFiles = os.listdir(inputFolder)
+#Loop through each file in the ARGOS folder
 for inputFile in inputFiles:
-    #Don't process README.txt file
-    if inputFile == 'README.txt':
-        continue
-    #Add full path to inputFile name
-    inputFile_full = os.path.join(inputFolder, inputFile)
-    print(f"Processing {inputFile}")
+    #error = 0
     
-#Construct a while loop to iterate through all lines in the datafile
+    #Give some status
+    arcpy.AddMessage("Processing {}".format(inputFile))
+    
+    #Skip the README.txt file
+    if inputFile == 'README.txt': continue
+
+    #Append the path to the file
+    inputFile = os.path.join(inputFolder,inputFile)
+
+    ## Construct a while loop to iterate through all lines in the datafile
     # Open the ARGOS data file for reading
-    inputFileObj = open(inputFile_full,'r')
-    
-    # Get the first line of data, so we can use the while loop
+    inputFileObj = open(inputFile,'r')
+
+    # Get the first line of data, so we can use a while loop
     lineString = inputFileObj.readline()
-    
-    #Start the while loop
-    while lineString: 
+    while lineString:
         
         # Set code to run only if the line contains the string "Date: "
         if ("Date :" in lineString):
@@ -65,9 +63,14 @@ for inputFile in inputFiles:
             
             # Extract attributes from the datum header line
             tagID = lineData[0]
-            obsDate= lineData[3]
+            obsDate = lineData[3]
             obsTime = lineData[4]
             obsLC = lineData[7]
+
+            # Check if obsLC in lcFilter
+            if not obsLC in lcFilter:
+                lineString = inputFileObj.readline()
+                continue
             
             # Extract location info from the next line
             line2String = inputFileObj.readline()
@@ -78,13 +81,13 @@ for inputFile in inputFiles:
             # Extract the date we need to variables
             obsLat = line2Data[2]
             obsLon= line2Data[5]
-            
+
             # Print results to see how we're doing
-           # print (tagID,obsDate,obsTime,obsLC,"Lat:"+obsLat,"Long:"+obsLon)
-            
+            #print (tagID,obsDate,obsTime,obsLC,"Lat:"+obsLat,"Long:"+obsLon)
+
             #Try to convert the coordinates to numbers
             try:
-    
+
                 # Convert raw coordinate strings to numbers
                 if obsLat[-1] == 'N':
                     obsLat = float(obsLat[:-1])
@@ -100,17 +103,21 @@ for inputFile in inputFiles:
                 obsPoint.X = obsLon
                 obsPoint.Y = obsLat
                 
+                #Handle any error
+            except Exception as e:
+                error_encounter += 1
+                
+                #arcpy.AddWarning("  Error adding record {} to the output".format(tagID))
                 # Convert the point to a point geometry object with spatial reference
                 inputSR = arcpy.SpatialReference(4326)
                 obsPointGeom = arcpy.PointGeometry(obsPoint,inputSR)
-                
+
                 # Create a feature object
-                feature = cur.insertRow((obsPointGeom,tagID,obsLC,obsDate.replace(".","/") + " " + obsTime))
-    
-            #Handle any error
-            except Exception as e:
-                print("Error adding record {} to the output".format(tagID))
-            
+                cur.insertRow((obsPointGeom,tagID,obsLC,obsDate.replace(".","/") + " " + obsTime))
+                
+                #Increment the total counter
+                total_counter += 1
+
         # Move to the next line so the while loop progresses
         lineString = inputFileObj.readline()
         
